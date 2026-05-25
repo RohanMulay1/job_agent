@@ -1,0 +1,116 @@
+{
+  "personal_info": {
+    "full_name": "Rohan Mulay",
+    "email": "rohanm1307@gmail.com",
+    "phone": "+91 7483994847",
+    "location": "Bengaluru, Karnataka, India",
+    "linkedin_url": "https://www.linkedin.com/in/rohan-mulay-122427302/",
+    "github_url": "https://github.com/RohanMulay1",
+    "portfolio_url": "https://rohanmulay.netlify.app/"
+  },
+  "resume_summary": "AI Engineer who has shipped production systems at both ends of the AI stack: TensorRT-optimized perception pipelines running at 100M+ km scale on embedded hardware, and LangGraph-based autonomous agents with RAG and vector search in the cloud. Combines edge AI depth with applied LLM engineering, making me effective on teams building either computer vision products or modern agentic applications.",
+  "education": [
+    {
+      "institution": "PES University",
+      "degree": "Bachelor of Technology",
+      "field_of_study": "Computer Science and Engineering",
+      "start_year": 2022,
+      "end_year": 2026,
+      "is_current": true,
+      "gpa": null
+    }
+  ],
+  "work_experience": [
+    {
+      "company": "BeGig Studio",
+      "title": "AI Engineer Intern",
+      "start_date": "2026-04",
+      "end_date": "2026-06",
+      "is_current": false,
+      "description": [
+        "Built an AI-powered candidate screening web app using LangGraph and LLM APIs, automating profile evaluation across 300+ candidates and cutting screening time by 65%.",
+        "Developed an internal resume optimization tool for a business school client using RAG and LLM APIs for semantic job-description matching, deployed with Next.js on Vercel.",
+        "Engineered 11 n8n automation workflows for GTM operations including lead enrichment, CRM sync, and outreach sequencing, reducing manual overhead by 80%.",
+        "Built SIREN, an autonomous incident response agent using LangGraph, Claude, and Qdrant with <3-min MTTR and 68% faster repeat-incident resolution via vector memory."
+      ],
+      "technologies": ["LangGraph", "LangChain", "RAG", "Qdrant", "Next.js", "Vercel", "n8n", "Claude", "OpenAI"]
+    },
+    {
+      "company": "BYTES / Cautio",
+      "title": "AI Engineer Intern",
+      "start_date": "2025-10",
+      "end_date": "2026-04",
+      "is_current": false,
+      "description": [
+        "32M+ safety alerts and 719K+ trips across 100+ cities powered by ADAS perception features (FCW, lane detection) deployed across 100M+ km.",
+        "Reduced inference latency from 42ms to 11ms by deploying YOLOv11 on NVIDIA Jetson Orin NX with TensorRT FP16 optimization, maintaining 91.3% mAP.",
+        "Built a multi-camera sensor fusion pipeline processing 4 concurrent video streams at 30 FPS on embedded hardware.",
+        "Developed a Driver Monitoring System for fatigue and facial recognition, achieving 96.7% accuracy on a 5K+ embedding database.",
+        "Designed FastAPI microservices with vector search for real-time driver profile lookup, reducing latency to <50ms at 10K+ queries/day."
+      ],
+      "technologies": ["YOLOv11", "TensorRT", "NVIDIA Jetson Orin NX", "CUDA", "FastAPI", "OpenCV", "Sensor Fusion", "ONNX Runtime"]
+    },
+    {
+      "company": "Moonrider.ai",
+      "title": "ADAS and Machine Learning Engineer Intern",
+      "start_date": "2025-04",
+      "end_date": "2025-10",
+      "is_current": false,
+      "description": [
+        "Designed and deployed a semantic segmentation pipeline for drivable area detection, achieving 83.4% mIoU across 6 terrain classes.",
+        "Defined data and validation pipeline with augmentation and LiDAR grounding across 15K+ frames.",
+        "Optimized models using pruning and INT8 quantization, reducing model size by 62% while sustaining 24 FPS on embedded hardware.",
+        "Built LSTM-based models for battery SoC and SoH prediction, achieving 2.1% RMSE across 800+ cycles."
+      ],
+      "technologies": ["PyTorch", "Semantic Segmentation", "LiDAR", "INT8 Quantization", "Model Pruning", "LSTM", "OpenCV", "TensorFlow"]
+    }
+  ],
+  "skills": [
+    {"name": "Python", "category": "language", "proficiency": "expert"},
+    {"name": "C/C++", "category": "language", "proficiency": "intermediate"},
+    {"name": "SQL", "category": "language", "proficiency": "intermediate"},
+    {"name": "PyTorch", "category": "framework", "proficiency": "expert"},
+    {"name": "TensorFlow", "category": "framework", "proficiency": "intermediate"},
+    {"name": "FastAPI", "category": "framework", "proficiency": "expert"},
+    {"name": "Next.js", "category": "framework", "proficiency": "intermediate"},
+    {"name": "LangChain", "category": "framework", "proficiency": "expert"},
+    {"name": "LangGraph", "category": "framework", "proficiency": "expert"},
+    {"name": "OpenCV", "category": "tool", "proficiency": "expert"},
+    {"name": "TensorRT", "category": "tool", "proficiency": "expert"},
+    {"name": "CUDA", "category": "tool", "proficiency": "intermediate"},
+    {"name": "ONNX Runtime", "category": "tool", "proficiency": "intermediate"},
+    {"name": "NVIDIA Jetson", "category": "tool", "proficiency": "expert"},
+    {"name": "Docker", "category": "tool", "proficiency": "intermediate"},
+    {"name": "Qdrant", "category": "tool", "proficiency": "expert"},
+    {"name": "Pinecone", "category": "tool", "proficiency": "intermediate"},
+    {"name": "FAISS", "category": "tool", "proficiency": "intermediate"},
+    {"name": "MongoDB", "category": "tool", "proficiency": "intermediate"},
+    {"name": "GCP", "category": "tool", "proficiency": "intermediate"},
+    {"name": "AWS", "category": "tool", "proficiency": "intermediate"},
+    {"name": "Git", "category": "tool", "proficiency": "expert"},
+    {"name": "Linux", "category": "tool", "proficiency": "intermediate"},
+    {"name": "LangFuse", "category": "tool", "proficiency": "intermediate"},
+    {"name": "n8n", "category": "tool", "proficiency": "expert"},
+    {"name": "Vercel", "category": "tool", "proficiency": "intermediate"},
+    {"name": "RAG Pipelines", "category": "technical", "proficiency": "expert"},
+    {"name": "Prompt Engineering", "category": "technical", "proficiency": "expert"},
+    {"name": "Multi-Agent Systems", "category": "technical", "proficiency": "expert"},
+    {"name": "Semantic Segmentation", "category": "technical", "proficiency": "expert"},
+    {"name": "Object Detection", "category": "technical", "proficiency": "expert"},
+    {"name": "Sensor Fusion", "category": "technical", "proficiency": "expert"},
+    {"name": "Monocular Depth Estimation", "category": "technical", "proficiency": "intermediate"},
+    {"name": "INT8/FP16 Quantization", "category": "technical", "proficiency": "expert"},
+    {"name": "Model Pruning", "category": "technical", "proficiency": "expert"},
+    {"name": "REST API Design", "category": "technical", "proficiency": "expert"}
+  ],
+  "certifications": [],
+  "languages": ["English (Fluent)", "Hindi (Native)", "Marathi (Native)"],
+  "years_total_experience": 1.25,
+  "desired_salary_min": 800000,
+  "desired_salary_max": 1200000,
+  "desired_salary_currency": "INR",
+  "willing_to_relocate": true,
+  "work_authorization": "Indian Citizen — No sponsorship needed",
+  "preferred_work_type": "hybrid",
+  "notice_period_days": 0
+}
