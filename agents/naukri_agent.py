@@ -231,6 +231,10 @@ class NaukriAgent(BaseAgent):
         if self._is_external_redirect(page.url):
             return False
 
+        if "login" in page.url.lower() or "signup" in page.url.lower():
+            logger.warning("[Naukri] Session expired — login redirect for %s", job.title)
+            return False
+
         # Grab description
         try:
             desc_el = page.locator(
@@ -295,5 +299,8 @@ class NaukriAgent(BaseAgent):
 
     @staticmethod
     async def _is_blocked(page: Page) -> bool:
+        url = page.url.lower()
+        if "login" in url or "signup" in url:
+            return True
         title = (await page.title()).lower()
-        return any(s in title for s in ["captcha", "robot", "blocked", "verify you're human"])
+        return any(s in title for s in ["captcha", "robot", "blocked", "verify you're human", "login", "sign in"])

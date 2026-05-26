@@ -2,10 +2,16 @@
 agents/wellfound_agent.py — Wellfound (AngelList Talent) native apply agent.
 
 Search strategy:
-  - URL: /jobs?q={title}&l={location}&jobType=full-time
-  - Skip any job whose apply button says "Apply on company site" (external ATS)
-  - Only proceed with native Wellfound applications
-  - Pagination via scroll-to-load (infinite scroll) or &page= param
+  - URL: /jobs?q={title}  (Wellfound search with React hydration wait)
+  - Job cards: div.styles_joblistingContainer__ZxslN containers
+  - Title link: a.styles_joblistingTitleAnchor__DFCkK with href /jobs/{id}-{slug}
+  - Company: a.styles_company__w5lec
+  - Infinite scroll for pagination
+
+Apply flow:
+  - Navigate to job URL, find Apply button, force click
+  - Wait for apply modal ([role='dialog']) — then LLM form loop via BaseAgent
+  - DataDome blocking: detected via captcha-delivery.com iframe in page source
 """
 
 from __future__ import annotations
@@ -20,11 +26,13 @@ from browser_engine import BrowserEngine
 from config import settings
 from profile_schema import CandidateProfile
 
-from .base_agent import BaseAgent, JobListing
+from .base_agent import ApplicationResult, ApplicationStatus, BaseAgent, JobListing
 
 logger = logging.getLogger(__name__)
 
 _WELLFOUND_BASE = "https://wellfound.com"
+_TITLE_LINK_SEL = "a.styles_joblistingTitleAnchor__DFCkK"
+_CONTAINER_SEL = "div.styles_joblistingContainer__ZxslN"
 
 
 class WellfoundAgent(BaseAgent):
@@ -37,126 +45,91 @@ class WellfoundAgent(BaseAgent):
 
     async def search_jobs(self) -> AsyncIterator[JobListing]:
         page = await self.engine.new_page()
+        yielded_keys: set[str] = set()
         try:
             for title in settings.target_titles:
-                for location in settings.target_locations:
-                    async for job in self._search_query(page, title, location):
+                async for job in self._search_query(page, title):
+                    if job.job_key not in yielded_keys:
+                        yielded_keys.add(job.job_key)
                         yield job
         finally:
             await page.close()
 
-    async def _search_query(
-        self, page: Page, title: str, location: str
-    ) -> AsyncIterator[JobListing]:
-        url = self._build_search_url(title, location)
-        logger.info("[Wellfound] Searching: %s in %s", title, location)
+    async def _search_query(self, page: Page, title: str) -> AsyncIterator[JobListing]:
+        url = f"{_WELLFOUND_BASE}/jobs?{urllib.parse.urlencode({'q': title})}"
+        logger.info("[Wellfound] Searching: %s", title)
 
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-            await BrowserEngine.human_delay(2000, 3500)
         except PlaywrightTimeout:
             logger.warning("[Wellfound] Page load timeout: %s", url)
             return
 
-        if await self._is_blocked(page):
-            logger.error("[Wellfound] Bot detection triggered")
+        # Wellfound is a Next.js app — wait explicitly for card anchor to render
+        try:
+            await page.wait_for_selector(_TITLE_LINK_SEL, timeout=15_000)
+        except PlaywrightTimeout:
+            logger.info("[Wellfound] No job cards found for '%s' after 15s", title)
             return
 
-        for page_num in range(settings.max_pages_per_search):
+        if await self._is_blocked(page):
+            logger.error("[Wellfound] Bot detection triggered on search page")
+            return
+
+        for _page_num in range(settings.max_pages_per_search):
             jobs = await self._extract_job_cards(page)
             if not jobs:
-                logger.info("[Wellfound] No results found for '%s' in '%s'", title, location)
+                logger.info("[Wellfound] No results for '%s'", title)
                 return
 
             for job in jobs:
                 yield job
 
-            # Wellfound uses infinite scroll — scroll down to load more
-            loaded = await self._scroll_for_more(page)
-            if not loaded:
+            # Wellfound uses infinite scroll
+            if not await self._scroll_for_more(page):
                 break
-
-    def _build_search_url(self, title: str, location: str) -> str:
-        params = {
-            "q": title,
-            "jobType": "full-time",
-        }
-        # Wellfound handles "Remote" as a special location
-        loc_lower = location.lower()
-        if "remote" in loc_lower:
-            params["remote"] = "true"
-        else:
-            params["l"] = location
-
-        return f"{_WELLFOUND_BASE}/jobs?{urllib.parse.urlencode(params)}"
 
     async def _extract_job_cards(self, page: Page) -> list[JobListing]:
         jobs: list[JobListing] = []
+        seen_keys: set[str] = set()
 
         try:
-            cards = await page.locator(
-                "[data-test='JobListing'], "
-                "div[class*='styles_component'][class*='JobListing'], "
-                "div[class*='job-listing']"
-            ).all()
-
-            if not cards:
-                # Broader fallback
-                cards = await page.locator("a[href*='/jobs/']").all()
+            title_links = await page.locator(_TITLE_LINK_SEL).all()
         except Exception:
             return jobs
 
-        seen_keys: set[str] = set()
-
-        for card in cards:
+        for link in title_links:
             try:
-                # Extract job URL from the card link
-                link = card.locator("a[href*='/jobs/']").first
                 href = await link.get_attribute("href") or ""
-                if not href:
-                    href = await card.get_attribute("href") or ""
-
-                if not href:
+                if not href or "/jobs/" not in href:
                     continue
 
                 full_url = href if href.startswith("http") else _WELLFOUND_BASE + href
+                # href looks like /jobs/4261027-ai-agent-engineer
                 job_key = href.split("/jobs/")[-1].split("?")[0].strip("/")
 
-                if job_key in seen_keys:
+                if not job_key or job_key in seen_keys:
                     continue
                 seen_keys.add(job_key)
 
-                # Title
-                title_el = card.locator(
-                    "h2, h3, [class*='title'], [data-test='job-title']"
-                ).first
-                title = (await title_el.text_content() or "").strip()
+                title = (await link.text_content() or "").strip()
 
-                # Company
-                company_el = card.locator(
-                    "[class*='company'], [data-test='company-name'], a[href*='/company/']"
-                ).first
-                company = (await company_el.text_content() or "").strip()
+                # Find the containing card, then grab the company link within it
+                container = page.locator(_CONTAINER_SEL).filter(has=page.locator(f"a[href='{href}']"))
+                company_el = container.locator("a.styles_company__w5lec").first
+                company = ""
+                if await company_el.count():
+                    company = (await company_el.text_content() or "").strip()
 
-                # Native apply check — look for "Apply on company site" text
-                external_signal = card.locator(
-                    "span:has-text('Apply on company site'), "
-                    "button:has-text('Apply on company site'), "
-                    "a:has-text('Apply on company site')"
-                )
-                is_external = bool(await external_signal.count())
-
-                if title and not is_external:
-                    jobs.append(
-                        JobListing(
-                            platform="wellfound",
-                            job_key=job_key,
-                            title=title,
-                            company=company,
-                            url=full_url,
-                            easy_apply=True,
-                        )
-                    )
+                if title:
+                    jobs.append(JobListing(
+                        platform="wellfound",
+                        job_key=job_key,
+                        title=title,
+                        company=company,
+                        url=full_url,
+                        easy_apply=True,
+                    ))
             except Exception as exc:
                 logger.debug("[Wellfound] Card parse error: %s", exc)
 
@@ -172,9 +145,12 @@ class WellfoundAgent(BaseAgent):
 
         try:
             await page.goto(job.url, wait_until="domcontentloaded", timeout=30_000)
-            await BrowserEngine.human_delay(1500, 3000)
+            await BrowserEngine.human_delay(2000, 3500)
         except PlaywrightTimeout:
             logger.warning("[Wellfound] Timeout loading job: %s", job.url)
+            return False
+
+        if await self._is_blocked(page):
             return False
 
         if self._is_external_redirect(page.url):
@@ -182,20 +158,17 @@ class WellfoundAgent(BaseAgent):
 
         # Grab description
         try:
-            desc_el = page.locator(
-                "[class*='description'], [data-test='job-description'], .prose"
-            ).first
+            desc_el = page.locator("[class*='description'], .prose, [class*='jobDescription']").first
             job.description = (await desc_el.text_content() or "")[:3000]
         except Exception:
             pass
 
-        # Hard check — if the only apply option is external, skip
+        # Skip jobs that only offer external apply
         external_btn = page.locator(
-            "a:has-text('Apply on company site'), "
-            "button:has-text('Apply on company site')"
+            "a:has-text('Apply on company site'), button:has-text('Apply on company site')"
         )
         if await external_btn.count():
-            logger.info("[Wellfound] External-only apply for %s — skipping", job.title)
+            logger.info("[Wellfound] External-only apply — skipping %s", job.title)
             return False
 
         # Find native apply button
@@ -210,17 +183,30 @@ class WellfoundAgent(BaseAgent):
             return False
 
         try:
-            await apply_btn.wait_for(state="visible", timeout=8000)
-            await BrowserEngine.human_delay(400, 800)
-            await apply_btn.click()
+            await BrowserEngine.human_delay(400, 900)
+            # force=True bypasses visibility checks — button may be in a fixed header
+            await apply_btn.click(force=True, timeout=8000)
 
-            await page.wait_for_selector(
-                "[role='dialog'], form[class*='apply'], [class*='ApplicationModal']",
-                timeout=15_000,
-            )
-            return True
-        except PlaywrightTimeout:
+            # Wait for the apply modal / inline form
+            try:
+                await page.wait_for_selector(
+                    "[role='dialog'], [class*='ApplicationModal'], [class*='applyModal']",
+                    timeout=12_000,
+                )
+                return True
+            except PlaywrightTimeout:
+                pass
+
+            # Fallback: maybe an inline form appeared on the page
+            await BrowserEngine.human_delay(1500, 2500)
+            if await page.locator("form").count():
+                return True
+
             logger.warning("[Wellfound] Apply modal did not appear for %s", job.title)
+            return False
+
+        except Exception as exc:
+            logger.warning("[Wellfound] Apply click failed for %s: %s", job.title, exc)
             return False
 
     # ------------------------------------------------------------------
@@ -228,14 +214,26 @@ class WellfoundAgent(BaseAgent):
     # ------------------------------------------------------------------
 
     async def _scroll_for_more(self, page: Page) -> bool:
-        """Scroll to the bottom; return True if new cards loaded."""
-        prev_count = await page.locator("[data-test='JobListing']").count()
+        prev_count = await page.locator(_TITLE_LINK_SEL).count()
         await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        await BrowserEngine.human_delay(2000, 3500)
-        new_count = await page.locator("[data-test='JobListing']").count()
+        await BrowserEngine.human_delay(2500, 4000)
+        new_count = await page.locator(_TITLE_LINK_SEL).count()
         return new_count > prev_count
+
+    # ------------------------------------------------------------------
+    # Block detection
+    # ------------------------------------------------------------------
 
     @staticmethod
     async def _is_blocked(page: Page) -> bool:
         title = (await page.title()).lower()
-        return any(s in title for s in ["captcha", "robot", "blocked", "sign in"])
+        if any(s in title for s in ["captcha", "robot", "blocked"]):
+            return True
+        # DataDome CAPTCHA challenge embeds an iframe pointing at captcha-delivery.com
+        try:
+            frame_sources = await page.evaluate(
+                "Array.from(document.querySelectorAll('iframe')).map(f => f.src)"
+            )
+            return any("captcha-delivery.com" in src for src in frame_sources)
+        except Exception:
+            return False
