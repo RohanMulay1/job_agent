@@ -244,58 +244,115 @@ class NaukriAgent(BaseAgent):
         except Exception:
             pass
 
-        # Find apply button — prefer Easy Apply, fall back to any Apply button.
-        # "Apply on company site" on Naukri IS native (navigates to /myapply/);
-        # external ATS is detected by href, not button text.
-        apply_btn = None
+        # Scroll down a bit to trigger Naukri's sticky header (which has a visible apply button)
+        await page.evaluate("window.scrollBy(0, 400)")
+        await BrowserEngine.human_delay(800, 1200)
 
-        easy_btn = page.locator(
-            "button:has-text('Easy Apply'), a:has-text('Easy Apply')"
-        ).first
-        if await easy_btn.count():
-            apply_btn = easy_btn
+        # Find a VISIBLE apply button — Naukri has multiple apply buttons; only some are visible.
+        # Prefer Easy Apply, then any visible Apply button.
+        apply_btn = await self._find_visible_apply_btn(page)
 
         if apply_btn is None:
-            candidates = page.locator("button:has-text('Apply'), a.apply-button")
-            count = await candidates.count()
-            for i in range(count):
-                btn = candidates.nth(i)
-                href = await btn.get_attribute("href") or ""
-                if not self._is_external_redirect(href):
-                    apply_btn = btn
-                    break
-
-        if apply_btn is None:
-            logger.info("[Naukri] No Apply button found for %s", job.title)
+            logger.info("[Naukri] No visible Apply button found for %s", job.title)
             return False
 
-        try:
-            await BrowserEngine.human_delay(300, 700)
-            # force=True bypasses visibility/scroll checks — the button may be in a sticky
-            # footer or off-viewport container that can't be scrolled into view normally.
-            await apply_btn.click(force=True, timeout=8000)
+        await BrowserEngine.human_delay(300, 700)
 
-            # Naukri 1-click navigates to /myapply/ rather than opening a modal
+        # Click the visible button; also try JS as final fallback
+        clicked = False
+        for attempt in ("normal", "js"):
             try:
-                await page.wait_for_url("**/myapply/**", timeout=10_000)
-                return True
-            except PlaywrightTimeout:
-                pass
+                if attempt == "normal":
+                    await apply_btn.click(timeout=5000)
+                else:
+                    handle = await apply_btn.element_handle()
+                    if handle:
+                        await page.evaluate("el => el.click()", handle)
+                    else:
+                        continue
+                clicked = True
+                break
+            except Exception as exc:
+                logger.debug("[Naukri] Apply click attempt '%s' failed: %s", attempt, exc)
 
-            # Some jobs show a modal/drawer instead
+        if not clicked:
+            # Last resort: click ANY apply-button via pure JS on the page
             try:
-                await page.wait_for_selector(
-                    "[role='dialog'], .apply-modal, form[class*='apply']",
-                    timeout=8_000,
+                await page.evaluate(
+                    "() => { const btn = document.querySelector('button.apply-button, "
+                    "a.apply-button, #apply-button'); if(btn) btn.click(); }"
                 )
-                return True
-            except PlaywrightTimeout:
-                logger.warning("[Naukri] No navigation or modal after Apply click for %s", job.title)
+                clicked = True
+                logger.debug("[Naukri] Fell back to page-level JS click for %s", job.title)
+            except Exception as exc:
+                logger.warning("[Naukri] All apply click attempts failed for %s: %s", job.title, exc)
                 return False
 
-        except Exception as exc:
-            logger.warning("[Naukri] Apply click failed for %s: %s", job.title, exc)
+        await BrowserEngine.human_delay(800, 1200)
+
+        # Check for login modal — session expired means nothing will work
+        try:
+            login_visible = await page.locator(
+                "[class*='login-layer'], [class*='loginModal'], "
+                "input[placeholder*='Email'], input[type='email']"
+            ).first.is_visible(timeout=2000)
+            if login_visible:
+                logger.warning("[Naukri] Login modal appeared — session expired for %s", job.title)
+                return False
+        except Exception:
+            pass
+
+        # Naukri 1-click navigates to /myapply/
+        try:
+            await page.wait_for_url("**/myapply/**", timeout=6_000)
+            return True
+        except PlaywrightTimeout:
+            pass
+
+        # Some jobs show a modal/drawer
+        try:
+            await page.wait_for_selector(
+                "[role='dialog'], .apply-modal, form[class*='apply']",
+                timeout=5_000,
+            )
+            return True
+        except PlaywrightTimeout:
+            logger.warning("[Naukri] No navigation or modal after Apply click for %s", job.title)
             return False
+
+    @staticmethod
+    async def _find_visible_apply_btn(page: Page):
+        """Return the first visible Apply button. Prefers Easy Apply."""
+        # Try Easy Apply first
+        for sel in [
+            "button:has-text('Easy Apply')",
+            "a:has-text('Easy Apply')",
+        ]:
+            try:
+                el = page.locator(sel).first
+                if await el.count() and await el.is_visible(timeout=2000):
+                    return el
+            except Exception:
+                pass
+
+        # Find ALL apply buttons and return the first visible one
+        candidates = page.locator(
+            "button:has-text('Apply'), a.apply-button, button.apply-button, "
+            "button[id*='apply'], a[id*='apply']"
+        )
+        count = await candidates.count()
+        for i in range(count):
+            try:
+                btn = candidates.nth(i)
+                href = await btn.get_attribute("href") or ""
+                # Skip external-redirect buttons
+                if "greenhouse" in href or "lever.co" in href or "ashbyhq" in href:
+                    continue
+                if await btn.is_visible(timeout=1000):
+                    return btn
+            except Exception:
+                pass
+        return None
 
     @staticmethod
     async def _is_blocked(page: Page) -> bool:

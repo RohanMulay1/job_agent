@@ -14,7 +14,6 @@ from playwright.async_api import (
     Playwright,
     async_playwright,
 )
-from playwright_stealth import stealth_async
 
 from config import settings
 
@@ -51,10 +50,16 @@ class BrowserEngine:
 
         self._user_data_dir.mkdir(parents=True, exist_ok=True)
 
+        # Prefer system Chrome over Playwright's bundled Chromium for better fingerprinting.
+        _CHROME = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+        import os
+        executable = _CHROME if os.path.exists(_CHROME) else None
+
         self._playwright = await async_playwright().start()
         self._context = await self._playwright.chromium.launch_persistent_context(
             user_data_dir=str(self._user_data_dir),
             headless=self._headless,
+            executable_path=executable,  # None → Playwright's bundled Chromium
             user_agent=_USER_AGENT,
             viewport=_VIEWPORT,
             locale="en-US",
@@ -66,11 +71,8 @@ class BrowserEngine:
                 "--password-store=basic",
             ],
         )
-
-        # Apply stealth patches to all existing and future pages
-        self._context.on("page", lambda page: asyncio.ensure_future(stealth_async(page)))
-        for page in self._context.pages:
-            await stealth_async(page)
+        if executable:
+            logger.info("Using system browser: %s", executable)
 
         logger.info("Browser launched (headless=%s, profile=%s)", self._headless, self._user_data_dir)
         return self._context
@@ -78,9 +80,7 @@ class BrowserEngine:
     async def new_page(self) -> Page:
         if self._context is None:
             raise RuntimeError("BrowserEngine not launched — call launch() first")
-        page = await self._context.new_page()
-        await stealth_async(page)
-        return page
+        return await self._context.new_page()
 
     async def close(self) -> None:
         if self._context:

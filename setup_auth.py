@@ -22,9 +22,9 @@ from config import settings
 
 
 PLATFORM_URLS = {
-    "Indeed": "https://www.indeed.com/account/login",
     "Naukri": "https://www.naukri.com/nlogin/login",
     "Wellfound": "https://wellfound.com/login",
+    "YC / Work at a Startup": "https://account.ycombinator.com/?continue=https%3A%2F%2Fwww.workatastartup.com%2F",
 }
 
 INSTRUCTIONS = """
@@ -33,9 +33,9 @@ INSTRUCTIONS = """
 ╠══════════════════════════════════════════════════════════════════════╣
 ║                                                                      ║
 ║  A browser window has opened with tabs for:                          ║
-║    • Indeed                                                          ║
 ║    • Naukri                                                          ║
 ║    • Wellfound                                                       ║
+║    • YC / Work at a Startup                                          ║
 ║                                                                      ║
 ║  For EACH tab:                                                       ║
 ║    1. Log in with your email and password                            ║

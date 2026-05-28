@@ -176,6 +176,74 @@ async def evaluate_job_fit(
         return JobFitResult(match=False, score=0.0, reason=f"API error: {exc}")
 
 
+_COVER_LETTER_SYSTEM = """\
+Write a 2-sentence cold outreach message for a startup job. Hard rules:
+
+- EXACTLY 2 sentences. No more.
+- Under 50 words total. Count every word.
+- Sentence 1: one specific thing about what the company actually does (from the JD). No adjectives like "innovative", "impressive", "game-changer", "revolutionizing".
+- Sentence 2: one concrete thing the candidate has built or done that is directly relevant. Be specific, not vague.
+- NO: "I am writing", "I would be a great fit", "passionate", "leverage", "excited", "love to", "I believe", "looking forward", "would love to connect", "keen to", "eager".
+- NO em dashes, NO hyphens as dashes, NO filler phrases.
+- Do NOT mention YC or Y Combinator.
+- Output ONLY the 2 sentences. Nothing else.
+"""
+
+
+async def generate_cover_letter(
+    company: str,
+    role: str,
+    job_description: str,
+    profile: CandidateProfile,
+) -> str:
+    """
+    Generate a short, personalized YC-style application message.
+    Uses the form model (70B) for quality.
+    """
+    top_skills = ", ".join(profile.expert_skills()[:6]) or profile.to_llm_summary()[:300]
+    recent_exp = ""
+    if profile.work_experience:
+        exp = profile.work_experience[0]
+        bullets = " | ".join(exp.description[:2])
+        recent_exp = f"Most recent: {exp.title} at {exp.company} — {bullets}"
+
+    user_message = (
+        f"COMPANY: {company}\n"
+        f"ROLE: {role}\n\n"
+        f"JOB DESCRIPTION:\n{job_description[:3000]}\n\n"
+        f"CANDIDATE:\n"
+        f"Name: {profile.personal_info.full_name}\n"
+        f"Summary: {profile.resume_summary}\n"
+        f"Expert skills: {top_skills}\n"
+        f"{recent_exp}"
+    )
+
+    logger.debug("generate_cover_letter → company=%s role=%s", company, role)
+
+    try:
+        response = await _client.chat.completions.create(
+            model=settings.form_model,
+            messages=[
+                {"role": "system", "content": _COVER_LETTER_SYSTEM},
+                {"role": "user", "content": user_message},
+            ],
+            temperature=0.4,
+            max_tokens=80,
+        )
+        text = (response.choices[0].message.content or "").strip()
+        logger.info("Cover letter generated for %s @ %s (%d chars)", role, company, len(text))
+        return text
+
+    except Exception as exc:
+        logger.error("generate_cover_letter error for %s @ %s: %s", role, company, exc)
+        # Fallback: minimal honest message
+        return (
+            f"Hi, I'm {profile.personal_info.full_name}. "
+            f"I came across the {role} role at {company} and wanted to reach out directly. "
+            f"{profile.resume_summary} I'd love to learn more about what you're building."
+        )
+
+
 async def parse_form_and_decide_actions(
     dom_snapshot: str,
     profile: CandidateProfile,

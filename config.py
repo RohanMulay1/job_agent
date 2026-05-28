@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     )
 
     # Run limits
-    max_applications_per_run: int = Field(default=10, ge=1, le=100)
+    max_applications_per_run: int = Field(default=10, ge=1, le=2000)
     max_pages_per_search: int = Field(default=5, ge=1, le=20)
 
     # Platforms
@@ -67,6 +67,8 @@ class Settings(BaseSettings):
         default="",
         description="Shared secret for dashboard API auth (x-api-key header)",
     )
+    nocodb_api_token: str = Field(default="", description="NocoDB API token")
+    nocodb_table_id: str = Field(default="", description="NocoDB job_applications table ID")
 
     # India-only locations — roles in these are applied regardless of type
     # Roles outside this list are only applied if they are remote
@@ -100,7 +102,7 @@ class Settings(BaseSettings):
     @field_validator("enabled_platforms", mode="after")
     @classmethod
     def _validate_platforms(cls, v: list[str]) -> list[str]:
-        allowed = {"indeed", "naukri", "wellfound"}
+        allowed = {"indeed", "naukri", "wellfound", "yc"}
         for platform in v:
             if platform not in allowed:
                 raise ValueError(f"Unknown platform '{platform}'. Allowed: {allowed}")
