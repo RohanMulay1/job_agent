@@ -60,11 +60,12 @@ class WellfoundAgent(BaseAgent):
         "backend-engineer",
     ]
     _LOCATION_SLUGS = [
-        "remote",
         "bangalore",
+        "bengaluru",
         "mumbai",
         "delhi",
         "hyderabad",
+        "pune",
     ]
 
     async def search_jobs(self) -> AsyncIterator[JobListing]:
