@@ -15,9 +15,11 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    # LLM — OpenRouter (OpenAI-compatible)
+    # LLM — OpenRouter (OpenAI-compatible, used as primary via Groq)
     openrouter_api_key: str = Field(..., description="OpenRouter API key")
     openrouter_base_url: str = Field(default="https://openrouter.ai/api/v1")
+    # OpenAI — fallback when Groq hits TPD rate limit (capped at 25 cover letter calls)
+    openai_api_key: str = Field(default="", description="OpenAI API key for rate-limit fallback")
     # Cheap model for bulk job-fit screening
     screen_model: str = Field(default="anthropic/claude-haiku-4-5")
     # Accurate model for multi-step form parsing

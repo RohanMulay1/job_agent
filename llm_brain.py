@@ -23,7 +23,7 @@ from profile_schema import CandidateProfile
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# OpenRouter client (OpenAI-compatible)
+# Clients
 # ---------------------------------------------------------------------------
 
 _client = AsyncOpenAI(
@@ -34,6 +34,15 @@ _client = AsyncOpenAI(
         "X-Title": "Autonomous Job Agent",
     },
 )
+
+# OpenAI fallback — used only when Groq hits TPD rate limit, capped at 25 calls
+_openai_client: AsyncOpenAI | None = (
+    AsyncOpenAI(api_key=settings.openai_api_key)
+    if settings.openai_api_key
+    else None
+)
+_openai_uses = 0
+_OPENAI_CAP = 25
 
 # ---------------------------------------------------------------------------
 # Pydantic response models
@@ -176,18 +185,26 @@ async def evaluate_job_fit(
         return JobFitResult(match=False, score=0.0, reason=f"API error: {exc}")
 
 
-_COVER_LETTER_SYSTEM = """\
-Write a 2-sentence cold outreach message for a startup job. Hard rules:
+_COVER_LETTER_SYSTEM_SHARED = """\
+Write a professional application note for a startup job. Requirements:
 
-- EXACTLY 2 sentences. No more.
-- Under 50 words total. Count every word.
-- Sentence 1: one specific thing about what the company actually does (from the JD). No adjectives like "innovative", "impressive", "game-changer", "revolutionizing".
-- Sentence 2: one concrete thing the candidate has built or done that is directly relevant. Be specific, not vague.
-- NO: "I am writing", "I would be a great fit", "passionate", "leverage", "excited", "love to", "I believe", "looking forward", "would love to connect", "keen to", "eager".
-- NO em dashes, NO hyphens as dashes, NO filler phrases.
-- Do NOT mention YC or Y Combinator.
-- Output ONLY the 2 sentences. Nothing else.
+Length: 70-100 words. Count carefully.
+Tone: direct, peer-level, confident. Not eager, not sycophantic.
+
+Structure (no headers, flowing prose):
+- Open by naming one specific, factual thing this company is actually building, drawn from the job description. No praise or adjectives.
+- Name two concrete things the candidate has shipped that are directly relevant to what this role needs. Use real metrics where available (latency, scale, accuracy).
+- Close with one sentence showing genuine interest in the technical problem, not the company or the opportunity.
+
+Hard bans: em dashes, "passionate", "excited", "leverage", "I believe", "I am writing", "great fit", "looking forward", "eager", "love to", "keen to", "thrilled", "I would", hyphens used as dashes.
+Do NOT mention YC or Y Combinator.
+Output ONLY the note. No subject line, no greeting, no sign-off.
 """
+
+_COVER_LETTER_SYSTEM_GROQ = _COVER_LETTER_SYSTEM_SHARED
+
+# OpenAI (GPT-4o) — same spec but higher model quality as rate-limit fallback
+_COVER_LETTER_SYSTEM_OPENAI = _COVER_LETTER_SYSTEM_SHARED
 
 
 async def generate_cover_letter(
@@ -197,9 +214,12 @@ async def generate_cover_letter(
     profile: CandidateProfile,
 ) -> str:
     """
-    Generate a short, personalized YC-style application message.
-    Uses the form model (70B) for quality.
+    Generate a short, personalized application note.
+    Primary: Groq llama-3.3-70b (fast, free).
+    Fallback: OpenAI gpt-4o when Groq hits TPD limit, capped at 25 uses.
     """
+    global _openai_uses
+
     top_skills = ", ".join(profile.expert_skills()[:6]) or profile.to_llm_summary()[:300]
     recent_exp = ""
     if profile.work_experience:
@@ -220,27 +240,54 @@ async def generate_cover_letter(
 
     logger.debug("generate_cover_letter → company=%s role=%s", company, role)
 
+    # ── Primary: Groq ────────────────────────────────────────────────────────
     try:
         response = await _client.chat.completions.create(
             model=settings.form_model,
             messages=[
-                {"role": "system", "content": _COVER_LETTER_SYSTEM},
+                {"role": "system", "content": _COVER_LETTER_SYSTEM_GROQ},
                 {"role": "user", "content": user_message},
             ],
             temperature=0.4,
-            max_tokens=80,
+            max_tokens=160,
         )
         text = (response.choices[0].message.content or "").strip()
         logger.info("Cover letter generated for %s @ %s (%d chars)", role, company, len(text))
         return text
 
     except Exception as exc:
+        is_rate_limit = "429" in str(exc) or "rate_limit" in str(exc).lower() or "TPD" in str(exc)
+
+        # ── Fallback: OpenAI (capped at 25 uses) ────────────────────────────
+        if is_rate_limit and _openai_client and _openai_uses < _OPENAI_CAP:
+            _openai_uses += 1
+            logger.warning(
+                "Groq rate-limited — using OpenAI fallback (%d/%d) for %s @ %s",
+                _openai_uses, _OPENAI_CAP, role, company,
+            )
+            try:
+                oai_response = await _openai_client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {"role": "system", "content": _COVER_LETTER_SYSTEM_OPENAI},
+                        {"role": "user", "content": user_message},
+                    ],
+                    temperature=0.5,
+                    max_tokens=150,
+                )
+                text = (oai_response.choices[0].message.content or "").strip()
+                logger.info(
+                    "Cover letter (OpenAI) for %s @ %s (%d chars)", role, company, len(text)
+                )
+                return text
+            except Exception as oai_exc:
+                logger.error("OpenAI fallback failed for %s @ %s: %s", role, company, oai_exc)
+
         logger.error("generate_cover_letter error for %s @ %s: %s", role, company, exc)
-        # Fallback: minimal honest message
         return (
-            f"Hi, I'm {profile.personal_info.full_name}. "
-            f"I came across the {role} role at {company} and wanted to reach out directly. "
-            f"{profile.resume_summary} I'd love to learn more about what you're building."
+            f"I've been building ML and AI systems across edge inference and LLM applications — "
+            f"the {role} work at {company} maps closely to what I've shipped. "
+            f"Happy to share specifics."
         )
 
 
