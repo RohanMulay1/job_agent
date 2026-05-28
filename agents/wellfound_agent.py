@@ -51,44 +51,25 @@ class WellfoundAgent(BaseAgent):
     # Search
     # ------------------------------------------------------------------
 
-    # Role slugs + location slugs that map to confirmed Wellfound URL patterns
-    _ROLE_SLUGS = [
-        "machine-learning-engineer",
-        "software-architect",
-        "ai-engineer",
-        "software-engineer",
-        "backend-engineer",
-    ]
-    _LOCATION_SLUGS = [
-        "bangalore",
-        "bengaluru",
-        "mumbai",
-        "delhi",
-        "hyderabad",
-        "pune",
-    ]
-
     async def search_jobs(self) -> AsyncIterator[JobListing]:
         page = await self.engine.new_page()
         yielded_keys: set[str] = set()
         try:
-            for role_slug in self._ROLE_SLUGS:
-                for loc_slug in self._LOCATION_SLUGS:
-                    async for job in self._search_role_url(page, role_slug, loc_slug):
-                        if job.job_key not in yielded_keys:
-                            yielded_keys.add(job.job_key)
-                            yield job
+            async for job in self._scrape_jobs_page(page):
+                if job.job_key not in yielded_keys:
+                    yielded_keys.add(job.job_key)
+                    yield job
         finally:
             await page.close()
 
-    async def _search_role_url(self, page: Page, role_slug: str, loc_slug: str) -> AsyncIterator[JobListing]:
-        url = f"{_BASE}/role/l/{role_slug}/{loc_slug}"
-        logger.info("[Wellfound] Searching: %s", url)
+    async def _scrape_jobs_page(self, page: Page) -> AsyncIterator[JobListing]:
+        url = f"{_BASE}/jobs"
+        logger.info("[Wellfound] Loading %s (apply your filters in the browser)", url)
 
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
         except PlaywrightTimeout:
-            logger.warning("[Wellfound] Page load timeout: %s", url)
+            logger.warning("[Wellfound] Page load timeout")
             return
 
         await BrowserEngine.human_delay(2500, 3500)
@@ -99,23 +80,38 @@ class WellfoundAgent(BaseAgent):
                 print(f"  Solve the slider CAPTCHA in the browser window — {remaining}s remaining...")
                 await asyncio.sleep(5)
             if await self._is_blocked(page):
-                logger.error("[Wellfound] Still blocked after wait — skipping %s", url)
+                logger.error("[Wellfound] Still blocked — aborting")
                 return
 
         try:
-            await page.wait_for_selector("a[href^='/jobs/']", timeout=12_000)
+            await page.wait_for_selector("a[href^='/jobs/']", timeout=15_000)
         except PlaywrightTimeout:
-            logger.info("[Wellfound] No job cards at %s", url)
+            logger.info("[Wellfound] No job cards found on /jobs page")
             return
 
-        for _page_num in range(settings.max_pages_per_search):
+        logger.info("[Wellfound] Page loaded — scraping and scrolling for more jobs...")
+        no_new_count = 0
+
+        while True:
             jobs = await self._extract_job_cards(page)
-            if not jobs:
-                break
+            new_jobs = [j for j in jobs if j.job_key not in {j.job_key for j in jobs}]
             for job in jobs:
                 yield job
-            if not await self._scroll_for_more(page):
-                break
+
+            # Scroll to bottom to trigger infinite scroll
+            prev_count = await page.locator("a[href^='/jobs/']").count()
+            await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            await BrowserEngine.human_delay(2500, 3500)
+            new_count = await page.locator("a[href^='/jobs/']").count()
+
+            if new_count <= prev_count:
+                no_new_count += 1
+                if no_new_count >= 3:
+                    logger.info("[Wellfound] No more jobs loading after scroll — done")
+                    break
+            else:
+                no_new_count = 0
+                logger.info("[Wellfound] Scrolled — %d job links visible", new_count)
 
     async def _extract_job_cards(self, page: Page) -> list[JobListing]:
         jobs: list[JobListing] = []
